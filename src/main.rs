@@ -1,47 +1,41 @@
-use std::vec;
+use std::{vec, array};
 use rand::thread_rng;
 use rand::seq::SliceRandom;
 use rand::Rng;
 use indicatif::ProgressBar;
 use rayon::prelude::*;
+use smallvec::*;
 
-const N_PUZZLES: u64 = 1000000;
+const N_PUZZLES: u64 = 1_000_000_000;
+
+type Grid = [[u8; 9]; 9];
 
 fn main() {
-    // let bar = ProgressBar::new(N_PUZZLES);
-    // bar.set_style(
-    //     indicatif::ProgressStyle::default_bar()
-    //         .template("[{elapsed_precise}/{eta_precise}] {wide_bar} {pos:>7}/{len:7} {msg}"),
-    // );
-    (0..N_PUZZLES).into_par_iter().for_each(|i| {
+    let bar = ProgressBar::new(N_PUZZLES);
+    bar.set_style(
+        indicatif::ProgressStyle::default_bar()
+            .template("[{elapsed_precise}/{eta_precise}] {wide_bar} {per_sec} {pos:>7}/{len:7} {msg}")
+            .unwrap()
+    );
+    (0..N_PUZZLES).into_par_iter().for_each(|_| {
         let puzzle = make_puzzle();
         print_sudoku(&puzzle);
         let answer = solve(puzzle).unwrap();
         print_sudoku(&answer);
         println!("-----------------");
-        // bar.inc(1);
+        bar.inc(1);
     });
-    // bar.finish();
+    bar.finish();
 }
 
-fn make_puzzle() -> Vec<Vec<i32>> {
-    let blank = vec![
-        vec![0; 9],
-        vec![0; 9],
-        vec![0; 9],
-        vec![0; 9],
-        vec![0; 9],
-        vec![0; 9],
-        vec![0; 9],
-        vec![0; 9],
-        vec![0; 9],
-    ];
+fn make_puzzle() -> Grid {
+    let blank = [[0; 9]; 9];
     let mut puzzle = solve(blank).unwrap();
     let mut rng = thread_rng();
     loop {
         // Try removing a random element from the puzzle
-        let row = rng.gen_range(0, 9);
-        let col = rng.gen_range(0, 9);
+        let row = rng.gen_range(0..9);
+        let col = rng.gen_range(0..9);
         let mut new_puzzle = puzzle.clone();
         new_puzzle[row][col] = 0;
         // If it doesn't result in a random sodoku grid, then just return the
@@ -56,7 +50,7 @@ fn make_puzzle() -> Vec<Vec<i32>> {
 
 // Returns true if the given puzzle has only one unique solution, and is
 // therefore a valid Sudoku puzzle.
-fn unique_solution(puzzle: &Vec<Vec<i32>>) -> bool {
+fn unique_solution(puzzle: &Grid) -> bool {
     // Solve the puzzle non-deterministically 10 times and make sure all the
     // solutions are the same.
     let solution = solve(puzzle.clone());
@@ -69,7 +63,7 @@ fn unique_solution(puzzle: &Vec<Vec<i32>>) -> bool {
     return true;
 }
 
-fn duplicate(v: &Vec<i32>) -> bool {
+fn duplicate(v: &[u8]) -> bool {
     for i in 0..v.len() {
         for j in i+1..v.len() {
             if  v[i] != 0 && v[i] == v[j] {
@@ -80,34 +74,42 @@ fn duplicate(v: &Vec<i32>) -> bool {
     return false;
 }
 
-fn is_valid(grid: &Vec<Vec<i32>>) -> bool {
+fn is_valid(grid: &Grid) -> bool {
     // Check that no rows or columns contain duplicate nonzero elements
     for i in 0..9 {
         let row = &grid[i];
-        let col: &Vec<i32> = &(0..9).map(|j| grid[j][i]).collect();
-        if duplicate(row) || duplicate(col) {
+        let col: Vec<u8> = (0..9).map(|j| grid[j][i]).collect();
+        if duplicate(row) || duplicate(&col) {
             return false;
         }
     }
     // Check that no 3x3 blocks contain duplicate nonzero elements
     for row in (0..9).step_by(3) {
         for col in (0..9).step_by(3) {
-            let mut block: Vec<i32> = Vec::new();
+            let mut found = [false; 9];
             for i in 0..3 {
                 for j in 0..3 {
-                    block.push(grid[row+i][col+j]);
+                    let num: usize = grid[row+i][col+j] as usize;
+                    if num > 0 {
+                        if found[num - 1] {
+                            return false;
+                        }
+                        found[num - 1] = true;
+                    }
+                    // block.push(grid[row+i][col+j]);
                 }
             }
-            if duplicate(&block) {
-                return false;
-            }
+            // if duplicate(&block) {
+            // if found.iter().any(|&x| !x) {
+            //     return false;
+            // }
         }
     }
     return true;
 }
 
 // Solves the sudoku puzzle with recursive backtracking.
-fn solve(puzzle: Vec<Vec<i32>>) -> Option<Vec<Vec<i32>>> {
+fn solve(puzzle: Grid) -> Option<Grid> {
     // Find the row and col of the last blank space (marked with a zero)
     // print_sudoku(&puzzle);
     let mut row = 0;
@@ -132,7 +134,7 @@ fn solve(puzzle: Vec<Vec<i32>>) -> Option<Vec<Vec<i32>>> {
     }
     // Recursive step: try all numbers 1 through 9 in the blank space and recurse
     // Try numbers 1 through 9 in random order to break determinism
-    let mut numbers: Vec<i32> = (1..10).collect();
+    let mut numbers: [u8; 9] = [1, 2, 3, 4, 5, 6, 7, 8, 9];
     let mut rng = thread_rng();
     numbers.shuffle(&mut rng);
     for i in numbers {
@@ -149,7 +151,7 @@ fn solve(puzzle: Vec<Vec<i32>>) -> Option<Vec<Vec<i32>>> {
     return None;
 }
 
-fn print_sudoku(grid: &Vec<Vec<i32>>) {
+fn print_sudoku(grid: &Grid) {
     for row in 0..9 {
         for col in 0..9 {
             print!("{} ", grid[row][col]);
@@ -163,54 +165,54 @@ fn print_sudoku(grid: &Vec<Vec<i32>>) {
 mod tests {
     #[test]
     fn test_solver() {
-        let puzzle = vec![
-            vec![0, 0, 0, 2, 6, 0, 7, 0, 1],
-            vec![6, 8, 0, 0, 7, 0, 0, 9, 0],
-            vec![1, 9, 0, 0, 0, 4, 5, 0, 0],
-            vec![8, 2, 0, 1, 0, 0, 0, 4, 0],
-            vec![0, 0, 4, 6, 0, 2, 9, 0, 0],
-            vec![0, 5, 0, 0, 0, 3, 0, 2, 8],
-            vec![0, 0, 9, 3, 0, 0, 0, 7, 4],
-            vec![0, 4, 0, 0, 5, 0, 0, 3, 6],
-            vec![7, 0, 3, 0, 1, 8, 0, 0, 0],
+        let puzzle = [
+            [0, 0, 0, 2, 6, 0, 7, 0, 1],
+            [6, 8, 0, 0, 7, 0, 0, 9, 0],
+            [1, 9, 0, 0, 0, 4, 5, 0, 0],
+            [8, 2, 0, 1, 0, 0, 0, 4, 0],
+            [0, 0, 4, 6, 0, 2, 9, 0, 0],
+            [0, 5, 0, 0, 0, 3, 0, 2, 8],
+            [0, 0, 9, 3, 0, 0, 0, 7, 4],
+            [0, 4, 0, 0, 5, 0, 0, 3, 6],
+            [7, 0, 3, 0, 1, 8, 0, 0, 0],
         ];
 
-        let answer = vec![
-            vec![4, 3, 5, 2, 6, 9, 7, 8, 1],
-            vec![6, 8, 2, 5, 7, 1, 4, 9, 3],
-            vec![1, 9, 7, 8, 3, 4, 5, 6, 2],
-            vec![8, 2, 6, 1, 9, 5, 3, 4, 7],
-            vec![3, 7, 4, 6, 8, 2, 9, 1, 5],
-            vec![9, 5, 1, 7, 4, 3, 6, 2, 8],
-            vec![5, 1, 9, 3, 2, 6, 8, 7, 4],
-            vec![2, 4, 8, 9, 5, 7, 1, 3, 6],
-            vec![7, 6, 3, 4, 1, 8, 2, 5, 9],
+        let answer = [
+            [4, 3, 5, 2, 6, 9, 7, 8, 1],
+            [6, 8, 2, 5, 7, 1, 4, 9, 3],
+            [1, 9, 7, 8, 3, 4, 5, 6, 2],
+            [8, 2, 6, 1, 9, 5, 3, 4, 7],
+            [3, 7, 4, 6, 8, 2, 9, 1, 5],
+            [9, 5, 1, 7, 4, 3, 6, 2, 8],
+            [5, 1, 9, 3, 2, 6, 8, 7, 4],
+            [2, 4, 8, 9, 5, 7, 1, 3, 6],
+            [7, 6, 3, 4, 1, 8, 2, 5, 9],
         ];
 
         assert_eq!(crate::solve(puzzle).unwrap(), answer);
 
-        let puzzle = vec![
-            vec![0, 0, 0, 6, 0, 0, 4, 0, 0],
-            vec![7, 0, 0, 0, 0, 3, 6, 0, 0],
-            vec![0, 0, 0, 0, 9, 1, 0, 8, 0],
-            vec![0, 0, 0, 0, 0, 0, 0, 0, 0],
-            vec![0, 5, 0, 1, 8, 0, 0, 0, 3],
-            vec![0, 0, 0, 3, 0, 6, 0, 4, 5],
-            vec![0, 4, 0, 2, 0, 0, 0, 6, 0],
-            vec![9, 0, 3, 0, 0, 0, 0, 0, 0],
-            vec![0, 2, 0, 0, 0, 0, 1, 0, 0],
+        let puzzle = [
+            [0, 0, 0, 6, 0, 0, 4, 0, 0],
+            [7, 0, 0, 0, 0, 3, 6, 0, 0],
+            [0, 0, 0, 0, 9, 1, 0, 8, 0],
+            [0, 0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 5, 0, 1, 8, 0, 0, 0, 3],
+            [0, 0, 0, 3, 0, 6, 0, 4, 5],
+            [0, 4, 0, 2, 0, 0, 0, 6, 0],
+            [9, 0, 3, 0, 0, 0, 0, 0, 0],
+            [0, 2, 0, 0, 0, 0, 1, 0, 0],
         ];
 
-        let answer = vec![
-            vec![5, 8, 1, 6, 7, 2, 4, 3, 9],
-            vec![7, 9, 2, 8, 4, 3, 6, 5, 1],
-            vec![3, 6, 4, 5, 9, 1, 7, 8, 2],
-            vec![4, 3, 8, 9, 5, 7, 2, 1, 6],
-            vec![2, 5, 6, 1, 8, 4, 9, 7, 3],
-            vec![1, 7, 9, 3, 2, 6, 8, 4, 5],
-            vec![8, 4, 5, 2, 1, 9, 3, 6, 7],
-            vec![9, 1, 3, 7, 6, 8, 5, 2, 4],
-            vec![6, 2, 7, 4, 3, 5, 1, 9, 8],
+        let answer = [
+            [5, 8, 1, 6, 7, 2, 4, 3, 9],
+            [7, 9, 2, 8, 4, 3, 6, 5, 1],
+            [3, 6, 4, 5, 9, 1, 7, 8, 2],
+            [4, 3, 8, 9, 5, 7, 2, 1, 6],
+            [2, 5, 6, 1, 8, 4, 9, 7, 3],
+            [1, 7, 9, 3, 2, 6, 8, 4, 5],
+            [8, 4, 5, 2, 1, 9, 3, 6, 7],
+            [9, 1, 3, 7, 6, 8, 5, 2, 4],
+            [6, 2, 7, 4, 3, 5, 1, 9, 8],
         ];
 
         assert_eq!(crate::solve(puzzle).unwrap(), answer);
@@ -220,14 +222,14 @@ mod tests {
     // Example sudoku puzzles
 
     // LA Times
-    // let puzzle = vec![
-    //     vec![9, 0, 0, 0, 3, 0, 0, 0, 2],
-    //     vec![0, 0, 0, 5, 4, 0, 0, 0, 0],
-    //     vec![0, 2, 0, 7, 0, 0, 0, 0, 4],
-    //     vec![0, 0, 0, 0, 0, 0, 6, 0, 5],
-    //     vec![0, 6, 0, 2, 0, 5, 0, 0, 0],
-    //     vec![7, 0, 1, 0, 0, 0, 0, 0, 0],
-    //     vec![2, 0, 0, 0, 0, 9, 0, 8, 0],
-    //     vec![0, 0, 0, 0, 5, 1, 3, 0, 0],
-    //     vec![4, 0, 0, 0, 0, 0, 0, 0, 9],
+    // let puzzle = [
+    //     [9, 0, 0, 0, 3, 0, 0, 0, 2],
+    //     [0, 0, 0, 5, 4, 0, 0, 0, 0],
+    //     [0, 2, 0, 7, 0, 0, 0, 0, 4],
+    //     [0, 0, 0, 0, 0, 0, 6, 0, 5],
+    //     [0, 6, 0, 2, 0, 5, 0, 0, 0],
+    //     [7, 0, 1, 0, 0, 0, 0, 0, 0],
+    //     [2, 0, 0, 0, 0, 9, 0, 8, 0],
+    //     [0, 0, 0, 0, 5, 1, 3, 0, 0],
+    //     [4, 0, 0, 0, 0, 0, 0, 0, 9],
     // ];
